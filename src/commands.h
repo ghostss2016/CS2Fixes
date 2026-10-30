@@ -86,6 +86,7 @@ public:
 
 	const char* GetName() { return m_sName.c_str(); }
 	const char* GetDescription() { return m_sDescription.c_str(); }
+	void SetDescription(const char* description) { m_sDescription = description; }
 	uint64 GetAdminFlags() { return m_nAdminFlags; }
 	bool IsCommandFlagSet(uint64 iFlag)
 	{

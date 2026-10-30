@@ -1,6 +1,7 @@
 # vim: set ts=2 sw=2 tw=99 noet ft=python: 
 import os
 import glob
+import json
 
 builder.SetBuildFolder('package')
 
@@ -18,15 +19,21 @@ class SDKPackage:
 
   def __init__(self, cxx, sdk_name):
     self.sdk_name = sdk_name
+    # The fleet consumes game-relative paths directly from package/addons.
+    self.game_root = "" if sdk_name == "cs2" else sdk_name
 
-    self.plugin_folder_path = os.path.join(self.sdk_name, 'addons', MMSPlugin.metadata['name'])
+    self.plugin_folder_path = os.path.join(self.game_root, 'addons', MMSPlugin.metadata['name'])
     self.plugin_folder = builder.AddFolder(self.plugin_folder_path)
 
-    self.metamod_path = os.path.join(self.sdk_name, 'addons', 'metamod')
+    self.metamod_path = os.path.join(self.game_root, 'addons', 'metamod')
     self.metamod = builder.AddFolder(self.metamod_path)
 
     self.addBinFolder(cxx)
     self.generateVDF()
+    if cxx.target.platform == 'linux' and cxx.target.arch == 'x86_64':
+      builder.AddOutputFile(os.path.join(self.plugin_folder_path, 'fleet-source.json'),
+        json.dumps({'version': 1, 'target': 'CS2Fixes',
+                    'binaryPath': 'addons/cs2fixes/cs2fixes.so'}, indent=2).encode('utf8'))
 
   def addBinFolder(self, cxx):
     platform64_path_map = {
@@ -35,7 +42,9 @@ class SDKPackage:
       'mac': 'osx64'
     }
 
-    if cxx.target.arch == 'x86_64':
+    if cxx.target.platform == 'linux' and cxx.target.arch == 'x86_64':
+      self.bin_path = self.plugin_folder_path
+    elif cxx.target.arch == 'x86_64':
       self.bin_path = os.path.join(self.plugin_folder_path, 'bin', platform64_path_map[cxx.target.platform])
     else:
       self.bin_path = os.path.join(self.plugin_folder_path, 'bin')
@@ -46,7 +55,7 @@ class SDKPackage:
     vdf_content = '"Metamod Plugin"\n'
     vdf_content += '{\n'
     vdf_content += f'\t"alias"\t"{MMSPlugin.metadata["alias"]}"\n'
-    vdf_content += f'\t"file"\t"{os.path.join(os.path.relpath(self.bin_path, self.sdk_name), MMSPlugin.metadata["name"])}"\n'
+    vdf_content += f'\t"file"\t"{os.path.join(os.path.relpath(self.bin_path, self.game_root or "."), MMSPlugin.metadata["name"])}"\n'
     vdf_content += '}'
 
     builder.AddOutputFile(os.path.join(self.metamod_path, f'{MMSPlugin.metadata["name"]}.vdf'), vdf_content.encode('utf8'))
@@ -105,13 +114,13 @@ for task in MMSPlugin.tasks:
     packages[sdk_name].addBinary(task.debug)
 
   # Add custom stuff here
-  builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'addons', MMSPlugin.metadata['name'], 'data'))
-  configs_folder = builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'addons', MMSPlugin.metadata['name'], 'configs'))
-  zr_folder = builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'addons', MMSPlugin.metadata['name'], 'configs', 'zr'))
-  ew_maps_folder = builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'addons', MMSPlugin.metadata['name'], 'configs', 'entwatch', 'maps'))
-  cfg_folder = builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'addons', MMSPlugin.metadata['name'], 'cfg'))
-  mapcfg_folder = builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'addons', MMSPlugin.metadata['name'], 'cfg', 'maps'))
-  gamedata_folder = builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'addons', MMSPlugin.metadata['name'], 'gamedata'))
+  builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'addons', MMSPlugin.metadata['name'], 'data'))
+  configs_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'addons', MMSPlugin.metadata['name'], 'configs'))
+  zr_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'addons', MMSPlugin.metadata['name'], 'configs', 'zr'))
+  ew_maps_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'addons', MMSPlugin.metadata['name'], 'configs', 'entwatch', 'maps'))
+  cfg_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'addons', MMSPlugin.metadata['name'], 'cfg'))
+  mapcfg_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'addons', MMSPlugin.metadata['name'], 'cfg', 'maps'))
+  gamedata_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'addons', MMSPlugin.metadata['name'], 'gamedata'))
   builder.AddCopy(os.path.join('configs', 'admins.jsonc.example'), configs_folder)
   builder.AddCopy(os.path.join('configs', 'discordbots.jsonc.example'), configs_folder)
   builder.AddCopy(os.path.join('configs', 'maplist.jsonc.example'), configs_folder)
@@ -121,10 +130,12 @@ for task in MMSPlugin.tasks:
   builder.AddCopy(os.path.join('configs', 'zr', 'playerclass.jsonc.example'), zr_folder)
   builder.AddCopy(os.path.join('configs', 'zr', 'weapons.cfg.example'), zr_folder)
   builder.AddCopy(os.path.join('configs', 'zr', 'hitgroups.cfg.example'), zr_folder)
+  for messages in glob.glob(os.path.join(builder.sourcePath, 'configs', 'zr', 'messages.*.jsonc')):
+    builder.AddCopy(messages, zr_folder)
   builder.AddCopy(os.path.join('configs', 'entwatch', 'maps', 'template.jsonc'), ew_maps_folder)
-  builder.AddCopy(os.path.join('gamedata', 'cs2fixes.jsonc'), gamedata_folder)
+  builder.AddCopy(os.path.join('gamedata', 'cs2fixes.json'), gamedata_folder)
 
-  particles_cs2f_folder = builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'particles', MMSPlugin.metadata['name']))
+  particles_cs2f_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'particles', MMSPlugin.metadata['name']))
   builder.AddCopy(os.path.join('assets', 'particles', MMSPlugin.metadata['name'], 'admin_beacon.vpcf_c'), particles_cs2f_folder)
   builder.AddCopy(os.path.join('assets', 'particles', MMSPlugin.metadata['name'], 'admin_beacon_inner.vpcf_c'), particles_cs2f_folder)
   builder.AddCopy(os.path.join('assets', 'particles', MMSPlugin.metadata['name'], 'leader_defend_mark.vpcf_c'), particles_cs2f_folder)
@@ -133,13 +144,13 @@ for task in MMSPlugin.tasks:
   builder.AddCopy(os.path.join('assets', 'particles', MMSPlugin.metadata['name'], 'napalm_fire.vpcf_c'), particles_cs2f_folder)
   builder.AddCopy(os.path.join('assets', 'particles', MMSPlugin.metadata['name'], 'simple_flashlight.vpcf_c'), particles_cs2f_folder)
 
-  materials_cs2f_folder = builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'materials', MMSPlugin.metadata['name']))
+  materials_cs2f_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'materials', MMSPlugin.metadata['name']))
   builder.AddCopy(os.path.join('assets', 'materials', MMSPlugin.metadata['name'], 'leader_defend_mark.vtex_c'), materials_cs2f_folder)
 
-  soundevents_folder = builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'soundevents'))
+  soundevents_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'soundevents'))
   builder.AddCopy(os.path.join('assets', 'soundevents', 'soundevents_zr.vsndevts_c'), soundevents_folder)
 
-  sounds_zr_folder = builder.AddFolder(os.path.join(packages[sdk_name].sdk_name, 'sounds', 'zr'))
+  sounds_zr_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'sounds', 'zr'))
   builder.AddCopy(os.path.join('assets', 'sounds', 'zr', 'fz_scream1.vsnd_c'), sounds_zr_folder)
   builder.AddCopy(os.path.join('assets', 'sounds', 'zr', 'zombie_die1.vsnd_c'), sounds_zr_folder)
   builder.AddCopy(os.path.join('assets', 'sounds', 'zr', 'zombie_die2.vsnd_c'), sounds_zr_folder)

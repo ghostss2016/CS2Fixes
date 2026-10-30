@@ -88,6 +88,218 @@ CConVar<float> g_cvarInfectShakeFrequency("zr_infect_shake_frequency", FCVAR_NON
 CConVar<float> g_cvarInfectShakeDuration("zr_infect_shake_duration", FCVAR_NONE, "Duration of shaking effect", 5.0f, true, 0.0f, false, 0.0f);
 CConVar<float> g_cvarDamageCashScale("zr_damage_cash_scale", FCVAR_NONE, "Multiplier on cash given when damaging zombies (0.0 = disabled)", 0.0f, true, 0.0f, false, 100.0f);
 
+namespace
+{
+using ZRMessages = std::map<std::string, std::string, std::less<>>;
+ZRMessages g_ZRMessages;
+bool g_bZRSlavicPlural = false;
+
+// This is an ABI contract for the existing varargs call sites, not fallback text.
+const ZRMessages g_ZRMessageFormats = {
+	{"round.intro", ""},
+	{"round.classic_spawn_warning", ""},
+	{"error.no_spawns", ""},
+	{"infection.started_hud", ""},
+	{"infection.started_chat", ""},
+	{"infection.classic_spawn_warning_hud", ""},
+	{"infection.countdown_hud", "sis"},
+	{"infection.countdown_chat", "sis"},
+	{"time.second_one", ""},
+	{"time.seconds_few", ""},
+	{"time.seconds_many", ""},
+	{"respawn.status", "s"},
+	{"state.enabled", ""},
+	{"state.disabled", ""},
+	{"command.player_only", ""},
+	{"sounds.infect_only", ""},
+	{"sounds.disabled", ""},
+	{"sounds.enabled", ""},
+	{"teleport.human_forbidden", ""},
+	{"teleport.dead_forbidden", ""},
+	{"teleport.pending", ""},
+	{"teleport.success", ""},
+	{"teleport.moved_too_far", ""},
+	{"class.current_and_available", "ss"},
+	{"class.available", "s"},
+	{"class.list_entry", "is"},
+	{"class.select_help", ""},
+	{"class.selected", "ss"},
+	{"class.no_match", "s"},
+	{"team.human", ""},
+	{"team.zombie", ""},
+	{"admin.infect_usage", ""},
+	{"round.already_over", ""},
+	{"admin.infected", ""},
+	{"admin.as_mother_single", ""},
+	{"admin.as_mother_multi", ""},
+	{"admin.revive_usage", ""},
+	{"round.not_ongoing", ""},
+	{"admin.revived", ""},
+	{"mother_zombies.none", ""},
+	{"mother_zombies.list", "s"},
+	{"command.help.zsounds", ""},
+	{"command.help.ztele", ""},
+	{"command.help.zclass", ""},
+	{"command.help.infect", ""},
+	{"command.help.revive", ""},
+	{"command.help.motherzombies", ""},
+	{"command.help.mz", ""},
+};
+
+bool ZR_ValidMessageFormat(const std::string& text, const std::string& expected)
+{
+	std::string signature;
+	for (size_t i = 0; i < text.size(); i++)
+	{
+		if (text[i] == '\0')
+			return false;
+		if (text[i] != '%')
+			continue;
+		if (++i == text.size())
+			return false;
+		if (text[i] == '%')
+			continue;
+		// Reject positional arguments, widths, *, length modifiers and %n too.
+		if (text[i] != 's' && text[i] != 'i')
+			return false;
+		signature += text[i];
+	}
+	return signature == expected;
+}
+
+bool ZR_ReadMessages(const char* language, ZRMessages& messages, bool& slavicPlural, bool requireAll)
+{
+	char path[MAX_PATH];
+	V_snprintf(path, sizeof(path), "%s/csgo/addons/cs2fixes/configs/zr/messages.%s.jsonc", Plat_GetGameDirectory(), language);
+	std::ifstream file(path);
+	if (!file.is_open())
+	{
+		Message("[ZR] Cannot open translations: %s\n", path);
+		return false;
+	}
+	ordered_json config = ordered_json::parse(file, nullptr, false, true);
+	if (config.is_discarded() || !config.is_object() || !config.contains("messages") || !config["messages"].is_object() ||
+		!config.contains("plural_rule") || !config["plural_rule"].is_string())
+	{
+		Message("[ZR] Invalid translations: %s\n", path);
+		return false;
+	}
+	const std::string pluralRule = config["plural_rule"].get<std::string>();
+	if (pluralRule != "one-other" && pluralRule != "russian")
+	{
+		Message("[ZR] Invalid plural_rule in %s\n", path);
+		return false;
+	}
+	slavicPlural = pluralRule == "russian";
+	for (const auto& [key, value] : config["messages"].items())
+	{
+		auto contract = g_ZRMessageFormats.find(key);
+		// Optional display labels never replace stable player-class identifiers.
+		const bool classLabel = key.compare(0, 6, "class.") == 0 && contract == g_ZRMessageFormats.end();
+		if (contract == g_ZRMessageFormats.end() && !classLabel)
+			continue;
+		if (!value.is_string())
+		{
+			Message("[ZR] Translation %s in %s must be a string\n", key.c_str(), path);
+			return false;
+		}
+		const std::string text = value.get<std::string>();
+		if (!ZR_ValidMessageFormat(text, classLabel ? "" : contract->second))
+		{
+			Message("[ZR] Invalid format parameters for %s in %s\n", key.c_str(), path);
+			return false;
+		}
+		messages.emplace(key, text);
+	}
+	if (requireAll)
+		for (const auto& [key, signature] : g_ZRMessageFormats)
+			if (!messages.contains(key))
+			{
+				Message("[ZR] Missing English translation %s in %s\n", key.c_str(), path);
+				return false;
+			}
+	return true;
+}
+
+const char* ZR_Message(const char* key)
+{
+	auto message = g_ZRMessages.find(key);
+	// A missing resource stays visible and printf-safe, rather than using wrong types.
+	return message != g_ZRMessages.end() ? message->second.c_str() : key;
+}
+
+const char* ZR_ClassDisplayName(const char* classId)
+{
+	auto label = g_ZRMessages.find(std::string("class.") + classId);
+	return label != g_ZRMessages.end() ? label->second.c_str() : classId;
+}
+
+const char* ZR_SecondsUnit(int seconds)
+{
+	if (!g_bZRSlavicPlural)
+		return ZR_Message(seconds == 1 ? "time.second_one" : "time.seconds_many");
+	if (seconds % 100 >= 11 && seconds % 100 <= 14)
+		return ZR_Message("time.seconds_many");
+	if (seconds % 10 == 1)
+		return ZR_Message("time.second_one");
+	return ZR_Message(seconds % 10 >= 2 && seconds % 10 <= 4 ? "time.seconds_few" : "time.seconds_many");
+}
+
+void ZR_UpdateCommandDescriptions()
+{
+	const char* commands[] = {"zsounds", "ztele", "zclass", "infect", "revive", "motherzombies", "mz"};
+	for (const char* command : commands)
+	{
+		auto entry = CommandList().find(hash_32_fnv1a_const(command));
+		if (entry != CommandList().end())
+			entry->second->SetDescription(ZR_Message((std::string("command.help.") + command).c_str()));
+	}
+}
+} // namespace
+
+CConVar<CUtlString> g_cvarZRLanguage("zr_language", FCVAR_NONE, "ZR message language; reload with zr_reload_translations or change map", "en");
+
+static bool ZR_LoadTranslations()
+{
+	ZRMessages messages;
+	bool slavicPlural = false;
+	if (!ZR_ReadMessages("en", messages, slavicPlural, true))
+		return false; // An erroneous reload preserves the last working cache.
+
+	const std::string language = g_cvarZRLanguage.Get().String();
+	bool validLanguage = !language.empty() && language.size() <= 16;
+	for (const char ch : language)
+		validLanguage &= (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
+	bool loaded = validLanguage;
+	if (validLanguage && language != "en")
+	{
+		ZRMessages localized;
+		loaded = ZR_ReadMessages(language.c_str(), localized, slavicPlural, false);
+		if (loaded)
+			for (auto& [key, text] : localized)
+				messages.insert_or_assign(key, std::move(text));
+	}
+	if (!loaded)
+	{
+		Message("[ZR] Cannot load language %s; keeping existing translations or English on first load\n", language.c_str());
+		if (!g_ZRMessages.empty())
+			return false;
+		slavicPlural = false;
+	}
+	g_ZRMessages.swap(messages);
+	g_bZRSlavicPlural = slavicPlural;
+	ZR_UpdateCommandDescriptions();
+	return loaded;
+}
+
+static void ZR_ReloadTranslationsCommand(const CCommandContext& context, const CCommand&)
+{
+	if (context.GetPlayerSlot().Get() != -1)
+		return;
+	Message("[ZR] Translation reload %s\n", ZR_LoadTranslations() ? "completed" : "failed");
+}
+static ConCommand g_ZRReloadTranslationsCommand("zr_reload_translations", ZR_ReloadTranslationsCommand, "Reload ZR translation resources", FCVAR_LINKED_CONCOMMAND);
+
 // meant only for offline config validation and can easily cause issues when used on live server
 #ifdef _DEBUG
 CON_COMMAND_F(zr_reload_classes, "- Reload ZR player classes", FCVAR_SPONLY | FCVAR_LINKED_CONCOMMAND)
@@ -100,6 +312,7 @@ CON_COMMAND_F(zr_reload_classes, "- Reload ZR player classes", FCVAR_SPONLY | FC
 
 void ZR_Precache(IEntityResourceManifest* pResourceManifest)
 {
+	ZR_LoadTranslations();
 	g_pZRPlayerClassManager->LoadPlayerClass();
 	g_pZRPlayerClassManager->PrecacheModels(pResourceManifest);
 
@@ -938,10 +1151,10 @@ void SetupCTeams()
 void ZR_OnRoundStart(IGameEvent* pEvent)
 {
 	SetupRespawnToggler();
-	ClientPrintAll(HUD_PRINTTALK, ZR_PREFIX "The game is \x05Humans vs. Zombies\x01, the goal for zombies is to infect all humans by knifing them.");
+	ClientPrintAll(HUD_PRINTTALK, "%s", ZR_Message("round.intro"));
 
 	if (g_cvarInfectSpawnWarning.Get() && g_cvarInfectSpawnType.Get() == (int)EZRSpawnType::IN_PLACE)
-		ClientPrintAll(HUD_PRINTTALK, ZR_PREFIX "Classic spawn is enabled! Zombies will be \x07spawning between humans\x01!");
+		ClientPrintAll(HUD_PRINTTALK, "%s", ZR_Message("round.classic_spawn_warning"));
 
 	if (!GetGlobals())
 		return;
@@ -1303,7 +1516,7 @@ void ZR_InitialInfection()
 	std::vector<SpawnPoint*> spawns = ZR_GetSpawns();
 	if (g_cvarInfectSpawnType.Get() == (int)EZRSpawnType::RESPAWN && !spawns.size())
 	{
-		ClientPrintAll(HUD_PRINTTALK, ZR_PREFIX "There are no spawns!");
+		ClientPrintAll(HUD_PRINTTALK, "%s", ZR_Message("error.no_spawns"));
 		return;
 	}
 
@@ -1374,8 +1587,8 @@ void ZR_InitialInfection()
 	if (g_cvarRespawnDelay.Get() < 0.0f)
 		g_bRespawnEnabled = false;
 
-	SendHudMessageAll(4, EHudPriority::InfectionCountdown, "First infection has started!");
-	ClientPrintAll(HUD_PRINTTALK, ZR_PREFIX "First infection has started! Good luck, survivors!");
+	SendHudMessageAll(4, EHudPriority::InfectionCountdown, "%s", ZR_Message("infection.started_hud"));
+	ClientPrintAll(HUD_PRINTTALK, "%s", ZR_Message("infection.started_chat"));
 	g_ZRRoundState = EZRRoundState::POST_INFECTION;
 }
 
@@ -1401,17 +1614,14 @@ void ZR_StartInitialCountdown()
 
 		if (g_iInfectionCountDown <= 60)
 		{
-			char classicSpawnMsg[256];
-
+			const char* classicSpawnMsg = "";
 			if (g_cvarInfectSpawnWarning.Get() && g_cvarInfectSpawnType.Get() == (int)EZRSpawnType::IN_PLACE)
-				V_snprintf(classicSpawnMsg, sizeof(classicSpawnMsg), "<span color='#940000'>WARNING: </span><span color='#FF3333'>Zombies will spawn between humans!</span><br>\u00A0<br>");
-			else
-				V_snprintf(classicSpawnMsg, sizeof(classicSpawnMsg), "");
+				classicSpawnMsg = ZR_Message("infection.classic_spawn_warning_hud");
 
-			SendHudMessageAll(2, EHudPriority::InfectionCountdown, "%sFirst infection in <span color='#00FF00'>%i %s</span>!", classicSpawnMsg, g_iInfectionCountDown, g_iInfectionCountDown == 1 ? "second" : "seconds");
+			SendHudMessageAll(2, EHudPriority::InfectionCountdown, ZR_Message("infection.countdown_hud"), classicSpawnMsg, g_iInfectionCountDown, ZR_SecondsUnit(g_iInfectionCountDown));
 
 			if (g_iInfectionCountDown % 5 == 0)
-				ClientPrintAll(HUD_PRINTTALK, "%sFirst infection in \7%i %s\1!", ZR_PREFIX, g_iInfectionCountDown, g_iInfectionCountDown == 1 ? "second" : "seconds");
+				ClientPrintAll(HUD_PRINTTALK, ZR_Message("infection.countdown_chat"), ZR_PREFIX, g_iInfectionCountDown, ZR_SecondsUnit(g_iInfectionCountDown));
 		}
 		(*iSecondsElapsed)++;
 
@@ -1544,7 +1754,7 @@ bool ZR_Detour_CEntityIdentity_AcceptInput(CEntityIdentity* pThis, CUtlSymbolLar
 	else
 		return true;
 
-	ClientPrintAll(HUD_PRINTTALK, ZR_PREFIX "Respawning is %s!", g_bRespawnEnabled ? "enabled" : "disabled");
+	ClientPrintAll(HUD_PRINTTALK, ZR_Message("respawn.status"), ZR_Message(g_bRespawnEnabled ? "state.enabled" : "state.disabled"));
 	return true;
 }
 
@@ -1822,11 +2032,11 @@ void ZR_PostEventAbstract_SosStartSoundEvent(const uint64* pClients, CNetMessage
 		*(uint64*)pClients &= g_playerManager->GetZSoundsMask();
 }
 
-CON_COMMAND_CHAT(zsounds, "- Toggle zombie sounds")
+CON_COMMAND_CHAT(zsounds, "")
 {
 	if (!player)
 	{
-		ClientPrint(player, HUD_PRINTCONSOLE, ZR_PREFIX "You cannot use this command from the server console.");
+		ClientPrint(player, HUD_PRINTCONSOLE, "%s", ZR_Message("command.player_only"));
 		return;
 	}
 
@@ -1836,23 +2046,23 @@ CON_COMMAND_CHAT(zsounds, "- Toggle zombie sounds")
 	if (state == EZSoundsType::ON)
 	{
 		state = EZSoundsType::INFECT_ONLY;
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Zombie sounds\x04 enabled\x10 (Infect sounds only).");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("sounds.infect_only"));
 	}
 	else if (state == EZSoundsType::INFECT_ONLY)
 	{
 		state = EZSoundsType::OFF;
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Zombie sounds\x07 disabled.");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("sounds.disabled"));
 	}
 	else if (state == EZSoundsType::OFF)
 	{
 		state = EZSoundsType::ON;
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Zombie sounds\x04 enabled.");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("sounds.enabled"));
 	}
 
 	g_playerManager->SetPlayerZSounds(iPlayer, state);
 }
 
-CON_COMMAND_CHAT(ztele, "- Teleport to spawn")
+CON_COMMAND_CHAT(ztele, "")
 {
 	// Silently return so the command is completely hidden
 	if (!g_cvarEnableZR.Get())
@@ -1860,21 +2070,21 @@ CON_COMMAND_CHAT(ztele, "- Teleport to spawn")
 
 	if (!player)
 	{
-		ClientPrint(player, HUD_PRINTCONSOLE, ZR_PREFIX "You cannot use this command from the server console.");
+		ClientPrint(player, HUD_PRINTCONSOLE, "%s", ZR_Message("command.player_only"));
 		return;
 	}
 
 	// Check if command is enabled for humans
 	if (!g_cvarZteleHuman.Get() && player->m_iTeamNum() == CS_TEAM_CT)
 	{
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "You cannot use this command as a human.");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("teleport.human_forbidden"));
 		return;
 	}
 
 	std::vector<SpawnPoint*> spawns = ZR_GetSpawns();
 	if (!spawns.size())
 	{
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "There are no spawns!");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("error.no_spawns"));
 		return;
 	}
 
@@ -1890,14 +2100,14 @@ CON_COMMAND_CHAT(ztele, "- Teleport to spawn")
 
 	if (!pPawn->IsAlive())
 	{
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "You cannot teleport when dead!");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("teleport.dead_forbidden"));
 		return;
 	}
 
 	// Get initial player position so we can do distance check
 	Vector initialpos = pPawn->GetAbsOrigin();
 
-	ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Teleporting to spawn in 5 seconds.");
+	ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("teleport.pending"));
 
 	CHandle<CCSPlayerPawn> pawnHandle = pPawn->GetHandle();
 
@@ -1916,18 +2126,18 @@ CON_COMMAND_CHAT(ztele, "- Teleport to spawn")
 			QAngle rotation = pSpawn->GetAbsRotation();
 
 			pPawn->Teleport(&origin, &rotation, nullptr);
-			ClientPrint(pPawn->GetOriginalController(), HUD_PRINTTALK, ZR_PREFIX "You have been teleported to spawn.");
+			ClientPrint(pPawn->GetOriginalController(), HUD_PRINTTALK, "%s", ZR_Message("teleport.success"));
 		}
 		else
 		{
-			ClientPrint(pPawn->GetOriginalController(), HUD_PRINTTALK, ZR_PREFIX "Teleport failed! You moved too far.");
+			ClientPrint(pPawn->GetOriginalController(), HUD_PRINTTALK, "%s", ZR_Message("teleport.moved_too_far"));
 		}
 
 		return -1.0f;
 	});
 }
 
-CON_COMMAND_CHAT(zclass, "<teamname/class name/number> - Find and select your Z:R classes")
+CON_COMMAND_CHAT(zclass, "")
 {
 	// Silently return so the command is completely hidden
 	if (!g_cvarEnableZR.Get())
@@ -1935,7 +2145,7 @@ CON_COMMAND_CHAT(zclass, "<teamname/class name/number> - Find and select your Z:
 
 	if (!player)
 	{
-		ClientPrint(player, HUD_PRINTCONSOLE, ZR_PREFIX "You cannot use this command from the server console.");
+		ClientPrint(player, HUD_PRINTCONSOLE, "%s", ZR_Message("command.player_only"));
 		return;
 	}
 
@@ -1959,20 +2169,20 @@ CON_COMMAND_CHAT(zclass, "<teamname/class name/number> - Find and select your Z:
 			if ((team == CS_TEAM_T && !bListingZombie) || (team == CS_TEAM_CT && !bListingHuman))
 				continue;
 
-			const char* sTeamName = team == CS_TEAM_CT ? "Human" : "Zombie";
+			const char* sTeamName = ZR_Message(team == CS_TEAM_CT ? "team.human" : "team.zombie");
 			const char* sCurrentClass = g_pUserPreferencesSystem->GetPreference(iSlot, team == CS_TEAM_CT ? HUMAN_CLASS_KEY_NAME : ZOMBIE_CLASS_KEY_NAME);
 
 			if (sCurrentClass[0] != '\0')
-				ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Your current %s class is: \x10%s\x1. Available classes:", sTeamName, sCurrentClass);
+				ClientPrint(player, HUD_PRINTTALK, ZR_Message("class.current_and_available"), sTeamName, ZR_ClassDisplayName(sCurrentClass));
 			else
-				ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Available %s classes:", sTeamName);
+				ClientPrint(player, HUD_PRINTTALK, ZR_Message("class.available"), sTeamName);
 
 			for (int i = 0; i < vecClasses.size(); i++)
 				if (vecClasses[i]->iTeam == team)
-					ClientPrint(player, HUD_PRINTTALK, "%i. %s", i + 1, vecClasses[i]->szClassName.c_str());
+					ClientPrint(player, HUD_PRINTTALK, ZR_Message("class.list_entry"), i + 1, ZR_ClassDisplayName(vecClasses[i]->szClassName.c_str()));
 		}
 
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Select a class using \x2!zclass <class name/number>");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("class.select_help"));
 		return;
 	}
 
@@ -1984,16 +2194,16 @@ CON_COMMAND_CHAT(zclass, "<teamname/class name/number> - Find and select your Z:
 
 		if (bClassMatches)
 		{
-			ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Your %s class is now set to \x10%s\x1.", pClass->iTeam == CS_TEAM_CT ? "Human" : "Zombie", sClassName);
+			ClientPrint(player, HUD_PRINTTALK, ZR_Message("class.selected"), ZR_Message(pClass->iTeam == CS_TEAM_CT ? "team.human" : "team.zombie"), ZR_ClassDisplayName(sClassName));
 			g_pUserPreferencesSystem->SetPreference(iSlot, pClass->iTeam == CS_TEAM_CT ? HUMAN_CLASS_KEY_NAME : ZOMBIE_CLASS_KEY_NAME, sClassName);
 			return;
 		}
 	}
 
-	ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "No available classes matched \x10%s\x1.", args[1]);
+	ClientPrint(player, HUD_PRINTTALK, ZR_Message("class.no_match"), args[1]);
 }
 
-CON_COMMAND_CHAT_FLAGS(infect, "- Infect a player", ADMFLAG_GENERIC)
+CON_COMMAND_CHAT_FLAGS(infect, "", ADMFLAG_GENERIC)
 {
 	// Silently return so the command is completely hidden
 	if (!g_cvarEnableZR.Get())
@@ -2001,13 +2211,13 @@ CON_COMMAND_CHAT_FLAGS(infect, "- Infect a player", ADMFLAG_GENERIC)
 
 	if (args.ArgC() < 2)
 	{
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Usage: !infect <name>");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("admin.infect_usage"));
 		return;
 	}
 
 	if (g_ZRRoundState == EZRRoundState::ROUND_END)
 	{
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "The round is already over!");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("round.already_over"));
 		return;
 	}
 
@@ -2023,7 +2233,7 @@ CON_COMMAND_CHAT_FLAGS(infect, "- Infect a player", ADMFLAG_GENERIC)
 
 	if (g_cvarInfectSpawnType.Get() == (int)EZRSpawnType::RESPAWN && !spawns.size())
 	{
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "There are no spawns!");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("error.no_spawns"));
 		return;
 	}
 
@@ -2038,10 +2248,10 @@ CON_COMMAND_CHAT_FLAGS(infect, "- Infect a player", ADMFLAG_GENERIC)
 			ZR_Infect(pTarget, pTarget, true);
 
 		if (iNumClients == 1)
-			PrintSingleAdminAction(strCommandPlayerName, pTarget->GetPlayerName(), "infected", g_ZRRoundState == EZRRoundState::ROUND_START ? " as a mother zombie" : "", ZR_PREFIX);
+			PrintSingleAdminAction(strCommandPlayerName, pTarget->GetPlayerName(), ZR_Message("admin.infected"), g_ZRRoundState == EZRRoundState::ROUND_START ? ZR_Message("admin.as_mother_single") : "", ZR_PREFIX);
 	}
 	if (iNumClients > 1)
-		PrintMultiAdminAction(nType, strCommandPlayerName, "infected", g_ZRRoundState == EZRRoundState::ROUND_START ? " as mother zombies" : "", ZR_PREFIX);
+		PrintMultiAdminAction(nType, strCommandPlayerName, ZR_Message("admin.infected"), g_ZRRoundState == EZRRoundState::ROUND_START ? ZR_Message("admin.as_mother_multi") : "", ZR_PREFIX);
 
 	// Note we skip MZ immunity when first infection is manually triggered
 	if (g_ZRRoundState == EZRRoundState::ROUND_START)
@@ -2053,7 +2263,7 @@ CON_COMMAND_CHAT_FLAGS(infect, "- Infect a player", ADMFLAG_GENERIC)
 	}
 }
 
-CON_COMMAND_CHAT_FLAGS(revive, "- Revive a player", ADMFLAG_GENERIC)
+CON_COMMAND_CHAT_FLAGS(revive, "", ADMFLAG_GENERIC)
 {
 	// Silently return so the command is completely hidden
 	if (!g_cvarEnableZR.Get())
@@ -2061,13 +2271,13 @@ CON_COMMAND_CHAT_FLAGS(revive, "- Revive a player", ADMFLAG_GENERIC)
 
 	if (args.ArgC() < 2)
 	{
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Usage: !revive <name>");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("admin.revive_usage"));
 		return;
 	}
 
 	if (g_ZRRoundState != EZRRoundState::POST_INFECTION)
 	{
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "A round is not ongoing!");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("round.not_ongoing"));
 		return;
 	}
 
@@ -2092,17 +2302,17 @@ CON_COMMAND_CHAT_FLAGS(revive, "- Revive a player", ADMFLAG_GENERIC)
 		ZR_StripAndGiveKnife(pPawn);
 
 		if (iNumClients == 1)
-			PrintSingleAdminAction(strCommandPlayerName, pTarget->GetPlayerName(), "revived", "", ZR_PREFIX);
+			PrintSingleAdminAction(strCommandPlayerName, pTarget->GetPlayerName(), ZR_Message("admin.revived"), "", ZR_PREFIX);
 	}
 	if (iNumClients > 1)
-		PrintMultiAdminAction(nType, strCommandPlayerName, "revived", "", ZR_PREFIX);
+		PrintMultiAdminAction(nType, strCommandPlayerName, ZR_Message("admin.revived"), "", ZR_PREFIX);
 }
 
 void MotherZombiesCommand(CCSPlayerController* player)
 {
 	if (g_ZRRoundState == EZRRoundState::ROUND_START || g_MotherZombies.size() == 0)
 	{
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "There are no mother zombies.");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("mother_zombies.none"));
 		return;
 	}
 
@@ -2132,17 +2342,17 @@ void MotherZombiesCommand(CCSPlayerController* player)
 	}
 
 	if (first)
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "There are no mother zombies.");
+		ClientPrint(player, HUD_PRINTTALK, "%s", ZR_Message("mother_zombies.none"));
 	else
-		ClientPrint(player, HUD_PRINTTALK, ZR_PREFIX "Mother zombies: %s", names.c_str());
+		ClientPrint(player, HUD_PRINTTALK, ZR_Message("mother_zombies.list"), names.c_str());
 }
 
-CON_COMMAND_CHAT(motherzombies, "- Print the current mother zombies to chat")
+CON_COMMAND_CHAT(motherzombies, "")
 {
 	MotherZombiesCommand(player);
 }
 
-CON_COMMAND_CHAT(mz, "- Print the current mother zombies to chat")
+CON_COMMAND_CHAT(mz, "")
 {
 	MotherZombiesCommand(player);
 }

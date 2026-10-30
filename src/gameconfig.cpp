@@ -11,7 +11,7 @@ CGameConfig* g_GameConfig = nullptr;
 
 bool CGameConfig::Init(char* conf_error, int conf_error_size)
 {
-	const char* pszGamedataPath = "addons/cs2fixes/gamedata/cs2fixes.jsonc";
+	const char* pszGamedataPath = "addons/cs2fixes/gamedata/cs2fixes.json";
 	char szPath[MAX_PATH];
 	V_snprintf(szPath, sizeof(szPath), "%s%s%s", Plat_GetGameDirectory(), "/csgo/", pszGamedataPath);
 	std::ifstream gamedataFile(szPath);

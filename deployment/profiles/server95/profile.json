@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "server": {
+    "panelServerId": 95,
+    "publicAddress": "185.35.192.10:27018",
+    "uuid": "bb6ed4d7-f1f4-44b5-bd29-62254aeec108"
+  },
+  "base": {
+    "repository": "Source2ZE/CS2Fixes",
+    "version": "v2.1",
+    "commit": "687f51acb2b717218f6e1e42710f14cfd58a1960",
+    "license": "GPL-3.0"
+  },
+  "nativeTarget": "CS2Fixes",
+  "existingFleetDependencies": [
+    {
+      "templateId": 25,
+      "name": "MultiAddonManager"
+    }
+  ],
+  "optionalMapFixes": {
+    "templateId": 24,
+    "name": "StripperCS2",
+    "installOnlyForMapsNeedingEntityOverrides": true
+  },
+  "addons": {
+    "serverAndClient": [
+      "3810102648",
+      "3157463861"
+    ]
+  },
+  "fileMapping": {
+    "cs2fixes.cfg": "addons/cs2fixes/cfg/cs2fixes.cfg",
+    "playerclass.jsonc": "addons/cs2fixes/configs/zr/playerclass.jsonc",
+    "weapons.cfg": "addons/cs2fixes/configs/zr/weapons.cfg",
+    "hitgroups.cfg": "addons/cs2fixes/configs/zr/hitgroups.cfg",
+    "multiaddonmanager.cfg": "cfg/multiaddonmanager/multiaddonmanager.cfg"
+  },
+  "preservedExistingServices": [
+    "CW",
+    "Utils",
+    "adminsystem_hcc"
+  ],
+  "standaloneMovementUnlocker": false,
+  "activation": "Files-only delivery through existing panel queue; runtime activation is separate."
+}

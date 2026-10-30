@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/Source2ZE/CS2Fixes",
+  "version": "v2.1",
+  "commit": "687f51acb2b717218f6e1e42710f14cfd58a1960",
+  "license": "GPL-3.0",
+  "integration": [
+    "Native Linux package uses existing fleet-source version1",
+    "Managed SDK paths supplied by existing cs2-ci",
+    "Runtime strict JSON gamedata preserves upstream signatures/offsets/patch bytes",
+    "External EN/RU Zombie:Reborn messages",
+    "Target95 profile with existing CW/Utils/AdminSystem services"
+  ],
+  "originalGamedata": "gamedata/cs2fixes.jsonc",
+  "activeGamedata": "gamedata/cs2fixes.json"
+}
