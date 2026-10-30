@@ -11,5 +11,12 @@
     "Target95 profile with existing CW/Utils/AdminSystem services"
   ],
   "originalGamedata": "gamedata/cs2fixes.jsonc",
-  "activeGamedata": "gamedata/cs2fixes.json"
+  "activeGamedata": "gamedata/cs2fixes.json",
+  "workshopInterface": {
+    "repository": "ghostss2016/MultiAddonManager",
+    "commit": "7bbaf931267b47447982a88f5fdcf39c8be47b74",
+    "interface": "MultiAddonManager003",
+    "operation": "AddAddon(id,false) after queued startup cfg",
+    "doesNotRefreshOrReloadMap": true
+  }
 }

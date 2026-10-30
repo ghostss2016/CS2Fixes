@@ -41,6 +41,7 @@
 #include "gamesystem.h"
 #include "hud_manager.h"
 #include "idlemanager.h"
+#include "imultiaddonmanager.h"
 #include "khook_helpers.h"
 #include "map_votes.h"
 #include "mapmigrations.h"
@@ -54,6 +55,8 @@
 #include "virtual_hooks.h"
 #include "votemanager.h"
 #include "zombiereborn.h"
+#include "vendor/nlohmann/json.hpp"
+#include <fstream>
 
 #include "tier0/memdbgon.h"
 
@@ -283,6 +286,49 @@ bool CS2Fixes::Unload(char* error, size_t maxlen)
 	return true;
 }
 
+// Run after all Load() callbacks and MAM's queued startup config exec. Do not
+// refresh the addon list here: MAM owns startup downloads and map lifecycle.
+static void ApplyWorkshopProfile(const CCommandContext& context, const CCommand&)
+{
+	if (context.GetPlayerSlot().Get() != -1)
+		return;
+	char path[MAX_PATH];
+	V_snprintf(path, sizeof(path), "%s/csgo/addons/cs2fixes/configs/workshop.json", Plat_GetGameDirectory());
+	std::ifstream file(path);
+	if (!file.is_open())
+		return; // Optional on installations without custom Workshop resources.
+	const auto profile = nlohmann::json::parse(file, nullptr, false, true);
+	if (profile.is_discarded() || !profile.is_object() || !profile.contains("addons") || !profile["addons"].is_array())
+	{
+		Message("[CS2Fixes] Invalid Workshop profile: %s (expected addons array)\n", path);
+		return;
+	}
+	for (const auto& addon : profile["addons"])
+	{
+		const auto* id = addon.get_ptr<const std::string*>();
+		if (!id || id->empty() || id->size() > 20 || id->find_first_not_of("0123456789") != std::string::npos)
+		{
+			Message("[CS2Fixes] Invalid Workshop addon ID in %s (expected decimal string)\n", path);
+			return;
+		}
+	}
+	if (profile["addons"].empty())
+		return;
+	auto* manager = static_cast<IMultiAddonManager*>(g_SMAPI->MetaFactory(MULTIADDONMANAGER_INTERFACE, nullptr, nullptr));
+	if (!manager)
+	{
+		Message("[CS2Fixes] Workshop profile not applied: %s is unavailable\n", MULTIADDONMANAGER_INTERFACE);
+		return;
+	}
+	for (const auto& addon : profile["addons"])
+	{
+		const auto& id = addon.get_ref<const std::string&>();
+		Message("[CS2Fixes] Workshop addon %s: %s\n", id.c_str(), manager->AddAddon(id.c_str(), false) ? "added to MAM startup list" : "already listed or not added");
+	}
+}
+static ConCommand g_ApplyWorkshopProfileCommand("cs2f_apply_workshop_profile", ApplyWorkshopProfile,
+	"Apply optional CS2Fixes Workshop addon profile", FCVAR_HIDDEN | FCVAR_LINKED_CONCOMMAND);
+
 void CS2Fixes::AllPluginsLoaded()
 {
 	/* This is where we'd do stuff that relies on the mod or other plugins
@@ -290,6 +336,7 @@ void CS2Fixes::AllPluginsLoaded()
 	 */
 
 	Message("AllPluginsLoaded\n");
+	g_pEngineServer2->ServerCommand("cs2f_apply_workshop_profile\n");
 }
 
 void* CS2Fixes::OnMetamodQuery(const char* iface, int* ret)

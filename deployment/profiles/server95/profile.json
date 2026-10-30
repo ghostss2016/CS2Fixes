@@ -34,7 +34,7 @@
     "playerclass.jsonc": "addons/cs2fixes/configs/zr/playerclass.jsonc",
     "weapons.cfg": "addons/cs2fixes/configs/zr/weapons.cfg",
     "hitgroups.cfg": "addons/cs2fixes/configs/zr/hitgroups.cfg",
-    "multiaddonmanager.cfg": "cfg/multiaddonmanager/multiaddonmanager.cfg"
+    "workshop.json": "addons/cs2fixes/configs/workshop.json"
   },
   "preservedExistingServices": [
     "CW",

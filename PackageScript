@@ -122,6 +122,7 @@ for task in MMSPlugin.tasks:
   mapcfg_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'addons', MMSPlugin.metadata['name'], 'cfg', 'maps'))
   gamedata_folder = builder.AddFolder(os.path.join(packages[sdk_name].game_root, 'addons', MMSPlugin.metadata['name'], 'gamedata'))
   builder.AddCopy(os.path.join('configs', 'admins.jsonc.example'), configs_folder)
+  builder.AddCopy(os.path.join('configs', 'workshop.json.example'), configs_folder)
   builder.AddCopy(os.path.join('configs', 'discordbots.jsonc.example'), configs_folder)
   builder.AddCopy(os.path.join('configs', 'maplist.jsonc.example'), configs_folder)
   builder.AddCopy(os.path.join('configs', 'cvar_whitelist.jsonc.example'), configs_folder)
