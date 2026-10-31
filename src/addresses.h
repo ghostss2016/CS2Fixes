@@ -18,6 +18,7 @@
  */
 
 #pragma once
+#include "const.h"
 #include "entity2/entityclass.h"
 #include "entity2/variant.h"
 #include "platform.h"
@@ -43,6 +44,7 @@ namespace modules
 #endif
 } // namespace modules
 
+class IGameSpawnGroupMgr;
 class CEntityInstance;
 class CEntityIdentity;
 class CBasePlayerController;
@@ -78,6 +80,7 @@ struct CGcBanInformation_t
 
 namespace addresses
 {
+	inline void(FASTCALL* GetSpawnGroups)(IGameSpawnGroupMgr*, CUtlVector<SpawnGroupHandle_t>*);
 	bool Initialize();
 	bool InitializeRipRelativeAddresses();
 	bool InitializeVScriptFunctions();

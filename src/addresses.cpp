@@ -81,6 +81,8 @@ bool addresses::Initialize()
 	RESOLVE_SIG("CBasePlayerPawn_SnapViewAngles", addresses::CBasePlayerPawn_SnapViewAngles);
 	RESOLVE_SIG("CBaseEntity_TakeDamageOld", addresses::CBaseEntity_TakeDamageOld);
 
+	RESOLVE_SIG("GetSpawnGroups", addresses::GetSpawnGroups);
+
 	return InitializeRipRelativeAddresses();
 }
 

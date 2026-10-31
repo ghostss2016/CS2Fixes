@@ -18,6 +18,7 @@
  */
 
 #pragma once
+#include "const.h"
 
 #include "playerslot.h"
 #include "steam/isteamugc.h"
@@ -30,6 +31,7 @@ void Message(const char*, ...);
 void Panic(const char*, ...);
 
 CUtlVector<CServerSideClient*>* GetClientList();
+bool GetActualSpawnGroups(CUtlVector<SpawnGroupHandle_t>& groups);
 CServerSideClient* GetClientBySlot(CPlayerSlot slot);
 
 uint32 GetSoundEventHash(const char* pszSoundEventName);

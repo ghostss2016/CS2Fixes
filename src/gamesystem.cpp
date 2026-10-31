@@ -157,14 +157,17 @@ GS_EVENT_MEMBER(CGameSystem, GameShutdown)
 
 GS_EVENT_MEMBER(CGameSystem, PostSpawnGroupLoad)
 {
-	if (!GetNetworkGameServer())
+	auto* clients = GetClientList();
+	if (!GetNetworkGameServer() || !clients)
 		return;
 
-	auto& spawnGroups = GetNetworkGameServer()->m_SpawnGroups;
+	CUtlVector<SpawnGroupHandle_t> spawnGroups;
+	if (!GetActualSpawnGroups(spawnGroups))
+		return;
 
 	// Ensure clients have no leaked spawngroups every time a new one loads
 	// Due to a timing problem for leaked spawngroups with this callback, clients may have one lingering, this is fine since it'll still be taken care of next time a spawngroup loads
-	for (auto pClient : *GetClientList())
+	for (auto pClient : *clients)
 	{
 		if (!pClient || pClient->m_LoadedSpawnGroups.Count() == spawnGroups.Count())
 			continue;
@@ -172,6 +175,6 @@ GS_EVENT_MEMBER(CGameSystem, PostSpawnGroupLoad)
 		pClient->m_LoadedSpawnGroups.RemoveAll();
 
 		for (const auto& spawnGroup : spawnGroups)
-			pClient->m_LoadedSpawnGroups.AddToTail(spawnGroup.key);
+			pClient->m_LoadedSpawnGroups.AddToTail(spawnGroup);
 	}
 }

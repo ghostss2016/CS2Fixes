@@ -21,6 +21,7 @@ public:
 	const char* GetSymbol(const char* name);
 	const char* GetPatch(const std::string& name);
 	int GetOffset(const std::string& name);
+	int GetClientListOffset() const { return m_iClientListOffset; }
 	void* GetAddress(const std::string& name, void* engine, void* server, char* error, int maxlen);
 	CModule** GetModule(const char* name);
 	bool IsSymbol(const char* name);
@@ -31,6 +32,7 @@ public:
 	byte* IDASigToUint8Array(const char* signature, size_t& length);
 
 private:
+	int m_iClientListOffset = -1;
 	std::unordered_map<std::string, int> m_umOffsets;
 	std::unordered_map<std::string, std::string> m_umSignatures;
 	std::unordered_map<std::string, void*> m_umAddresses;

@@ -1,4 +1,6 @@
 #include "gameconfig.h"
+#include "common_gamedata.h"
+#include "cs2fixes.h"
 #include "addresses.h"
 #include "khook.hpp"
 #undef snprintf
@@ -11,6 +13,42 @@ CGameConfig* g_GameConfig = nullptr;
 
 bool CGameConfig::Init(char* conf_error, int conf_error_size)
 {
+	// The complete client vector is no longer part of the public SDK layout.
+	// Read the current engine-derived binding once, before any client hooks run.
+	FleetGamedata::Document shared;
+	std::string reason;
+	if (!shared.load(std::string(g_SMAPI->GetBaseDir()) + "/addons/configs/signatures.ini", reason))
+	{
+		snprintf(conf_error, conf_error_size, "%s", reason.c_str());
+		return false;
+	}
+#if defined _LINUX
+	const std::string prefix = "Plugins/MultiAddonManager/linux/";
+#else
+	const std::string prefix = "Plugins/MultiAddonManager/windows/";
+#endif
+	m_iClientListOffset = shared.integer(prefix + "ClientListOffset");
+	if (m_iClientListOffset <= 0 || m_iClientListOffset >= 65536 || m_iClientListOffset % 8 != 0)
+	{
+		m_iClientListOffset = -1;
+		snprintf(conf_error, conf_error_size, "Missing or invalid %sClientListOffset in signatures.ini", prefix.c_str());
+		return false;
+	}
+
+#if defined _LINUX
+	const char* spawnGroupKey = "Plugins/CS2Fixes/Signatures/GetSpawnGroups/linux";
+#else
+	const char* spawnGroupKey = "Plugins/CS2Fixes/Signatures/GetSpawnGroups/windows";
+#endif
+	const char* spawnGroupLibrary = shared.get("Plugins/CS2Fixes/Signatures/GetSpawnGroups/library");
+	std::vector<uint8_t> spawnGroupBytes;
+	const char* spawnGroupPattern = shared.get(spawnGroupKey);
+	if (std::string(spawnGroupLibrary) != "server" || !IsValidIDASignature(spawnGroupPattern, spawnGroupBytes))
+	{
+		snprintf(conf_error, conf_error_size, "Missing or invalid %s in signatures.ini", spawnGroupKey);
+		return false;
+	}
+
 	const char* pszGamedataPath = "addons/cs2fixes/gamedata/cs2fixes.json";
 	char szPath[MAX_PATH];
 	V_snprintf(szPath, sizeof(szPath), "%s%s%s", Plat_GetGameDirectory(), "/csgo/", pszGamedataPath);
@@ -105,6 +143,10 @@ bool CGameConfig::Init(char* conf_error, int conf_error_size)
 			}
 		}
 	}
+
+	// This binding is owned by the shared engine gamedata.
+	m_umLibraries["GetSpawnGroups"] = spawnGroupLibrary;
+	m_umSignatures["GetSpawnGroups"] = spawnGroupPattern;
 
 	return true;
 }

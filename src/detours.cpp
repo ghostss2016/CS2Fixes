@@ -684,15 +684,17 @@ KHook::Return<void> Detour_CTriggerGravity_GravityTouch(CTriggerGravity* pEntity
 KHook::Return<CServerSideClient*> Detour_GetFreeClient(int64_t unk1, const __m128i* unk2, unsigned int unk3, int64_t unk4, char unk5, void* unk6)
 {
 	// Not sure if this function can even be called in this state, but if it is, we can't do shit anyways
-	if (!GetClientList() || !GetGlobals())
-		return {KHook::Action::Supersede, nullptr};
+	auto* clients = GetClientList();
+	auto* globals = GetGlobals();
+	if (!clients || !globals)
+		return {KHook::Action::Ignore};
 
 	// Check if there is still unused slots, this should never break so just fall back to original behaviour for ease (we don't have a CServerSideClient constructor)
-	if (GetGlobals()->maxClients != GetClientList()->Count())
+	if (globals->maxClients != clients->Count())
 		return {KHook::Action::Ignore};
 
 	// Phantom client fix
-	for (CServerSideClient* pClient : *GetClientList())
+	for (CServerSideClient* pClient : *clients)
 		if (pClient && pClient->GetSignonState() < SIGNONSTATE_CONNECTED)
 			return {KHook::Action::Supersede, pClient};
 

@@ -20,6 +20,8 @@
 #include "utils.h"
 #include "../cs2fixes.h"
 #include "../gameconfig.h"
+#include "../addresses.h"
+#include "engine2/isource2engine.h"
 #include "engine2/ivengineserver2.h"
 
 void Message(const char* msg, ...)
@@ -50,17 +52,30 @@ void Panic(const char* msg, ...)
 
 CUtlVector<CServerSideClient*>* GetClientList()
 {
-	if (!GetNetworkGameServer())
+	auto* server = GetNetworkGameServer();
+	const int offset = g_GameConfig ? g_GameConfig->GetClientListOffset() : -1;
+	if (!server || offset <= 0)
 		return nullptr;
 
-	return (CUtlVector<CServerSideClient*>*)&GetNetworkGameServer()->m_Clients;
+	return reinterpret_cast<CUtlVector<CServerSideClient*>*>(reinterpret_cast<char*>(server) + offset);
+}
+
+// The manager interface is the first base of CSpawnGroupMgrGameSystem.
+// Use its full vector-out accessor, including already loaded spawn groups.
+bool GetActualSpawnGroups(CUtlVector<SpawnGroupHandle_t>& groups)
+{
+	auto* manager = g_pNetworkServerService ? g_pNetworkServerService->GetGameSpawnGroupMgr() : nullptr;
+	if (!manager || !addresses::GetSpawnGroups)
+		return false;
+	addresses::GetSpawnGroups(manager, &groups);
+	return true;
 }
 
 CServerSideClient* GetClientBySlot(CPlayerSlot slot)
 {
 	CUtlVector<CServerSideClient*>* pClients = GetClientList();
 
-	if (!pClients)
+	if (!pClients || slot.Get() < 0 || slot.Get() >= pClients->Count())
 		return nullptr;
 
 	return pClients->Element(slot.Get());

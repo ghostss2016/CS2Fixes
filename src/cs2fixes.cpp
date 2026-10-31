@@ -228,6 +228,7 @@ bool CS2Fixes::Unload(char* error, size_t maxlen)
 
 	if (g_GameConfig)
 		delete g_GameConfig;
+	g_GameConfig = nullptr;
 
 	if (g_pAdminSystem)
 		delete g_pAdminSystem;
