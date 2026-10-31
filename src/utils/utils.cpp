@@ -22,6 +22,7 @@
 #include "../gameconfig.h"
 #include "../addresses.h"
 #include "engine2/isource2engine.h"
+#include "engine2/inetworkserverservice.h"
 #include "engine2/ivengineserver2.h"
 
 void Message(const char* msg, ...)
