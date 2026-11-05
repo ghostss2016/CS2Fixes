@@ -49,6 +49,18 @@ bool CGameConfig::Init(char* conf_error, int conf_error_size)
 		return false;
 	}
 
+#if defined _LINUX
+	const char* scriptModelKey = "Plugins/CS2Fixes/Signatures/CS_Script_SetModel/linux";
+	const char* scriptModelLibrary = shared.get("Plugins/CS2Fixes/Signatures/CS_Script_SetModel/library");
+	const char* scriptModelPattern = shared.get(scriptModelKey);
+	std::vector<uint8_t> scriptModelBytes;
+	if (std::string(scriptModelLibrary) != "server" || !IsValidIDASignature(scriptModelPattern, scriptModelBytes))
+	{
+		snprintf(conf_error, conf_error_size, "Missing or invalid %s in signatures.ini", scriptModelKey);
+		return false;
+	}
+#endif
+
 	const char* pszGamedataPath = "addons/cs2fixes/gamedata/cs2fixes.json";
 	char szPath[MAX_PATH];
 	V_snprintf(szPath, sizeof(szPath), "%s%s%s", Plat_GetGameDirectory(), "/csgo/", pszGamedataPath);
@@ -147,6 +159,10 @@ bool CGameConfig::Init(char* conf_error, int conf_error_size)
 	// This binding is owned by the shared engine gamedata.
 	m_umLibraries["GetSpawnGroups"] = spawnGroupLibrary;
 	m_umSignatures["GetSpawnGroups"] = spawnGroupPattern;
+#if defined _LINUX
+	m_umLibraries["CS_Script_SetModel"] = scriptModelLibrary;
+	m_umSignatures["CS_Script_SetModel"] = scriptModelPattern;
+#endif
 
 	return true;
 }
